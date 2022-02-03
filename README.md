@@ -48,4 +48,6 @@ Hit CTRL-C to stop the server
 
 ## Links
 
- - [WebGL 2 / GLSL 300 ES](https://www.khronos.org/files/webgl20-reference-guide.pdf) reference guide.
+ - [WebGL 2 / GLSL 300 ES](https://www.khronos.org/files/webgl20-reference-guide.pdf) reference guide (note WebGL 1 uses GLSL 100 ES). 
+ - [WebGL2 Fundamentals](https://webgl2fundamentals.org) provides outstanding tutorials.
+ - Graphical WebGL  examples (many WebGL 1) include [shadertoy](https://www.shadertoy.com), [glslsandbox](https://glslsandbox.com), [webgl-shaders](https://webgl-shaders.com), [webglsamples](https://webglsamples.org).
