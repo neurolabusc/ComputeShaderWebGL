@@ -21,7 +21,6 @@ precision highp int;
 precision highp float;
 uniform highp sampler3D volume;
 uniform highp sampler3D gradients;
-uniform highp sampler2D colormap;
 uniform ivec3 volume_dims;
 uniform float dt_scale;
 uniform vec3 light_pos;
@@ -72,8 +71,7 @@ void main(void) {
 	float offset = wang_hash(int(gl_FragCoord.x + 640.0 * gl_FragCoord.y));
 	vec3 p = transformed_eye + (t_hit.x + offset * dt) * ray_dir;
 	for (float t = t_hit.x; t < t_hit.y; t += dt) {
-		float val = texture(volume, p).r;
-		vec4 val_color = texture(colormap, vec2(val, 0.5)).rgba;
+		vec4 val_color = texture(volume, p).rgba;
 		//use gradients to estimate 'a'mbient, 'd'iffuse and 's'pecular lighting
 		vec4 gradSample= texture(gradients, p);
 		gradSample.rgb = normalize(gradSample.rgb*2.0 - 1.0);
@@ -94,7 +92,7 @@ void main(void) {
 
 var fragShaderGradients =
 `#version 300 es
-#line 97
+#line 96
 precision highp int;
 precision highp float;
 uniform highp sampler3D gradients;
@@ -156,11 +154,10 @@ void main(void) {
 
 var fragShader =
 `#version 300 es
-#line 159
+#line 158
 precision highp int;
 precision highp float;
 uniform highp sampler3D volume;
-uniform highp sampler2D colormap;
 uniform ivec3 volume_dims;
 uniform float dt_scale;
 in vec3 vray_dir;
@@ -200,11 +197,11 @@ void main(void) {
 	t_hit.x = max(t_hit.x, 0.0);
 	vec3 dt_vec = 1.0 / (vec3(volume_dims) * abs(ray_dir));
 	float dt = dt_scale * min(dt_vec.x, min(dt_vec.y, dt_vec.z));
-	float offset = wang_hash(int(gl_FragCoord.x + 640.0 * gl_FragCoord.y));
+	t_hit.x += 0.5 * (t_hit.y - t_hit.x); //TODO CUTOUT
+	float offset = 0.0; //wang_hash(int(gl_FragCoord.x + 640.0 * gl_FragCoord.y));
 	vec3 p = transformed_eye + (t_hit.x + offset * dt) * ray_dir;
 	for (float t = t_hit.x; t < t_hit.y; t += dt) {
-		float val = texture(volume, p).r;
-		vec4 val_color = texture(colormap, vec2(val, 0.5)).rgba;
+		vec4 val_color = texture(volume, p);
 		val_color.a = 1.0-pow((1.0 - val_color.a), dt_scale); //opacityCorrection
 		color.rgb += (1.0 - color.a) * val_color.a * val_color.rgb;
 		color.a += (1.0 - color.a) * val_color.a;
@@ -216,11 +213,10 @@ void main(void) {
 
 var fragShaderMIP =
 `#version 300 es
-#line 219
+#line 217
 precision highp int;
 precision highp float;
 uniform highp sampler3D volume;
-uniform highp sampler2D colormap;
 uniform ivec3 volume_dims;
 uniform float dt_scale;
 in vec3 vray_dir;
@@ -264,20 +260,19 @@ void main(void) {
 	vec3 p = transformed_eye + (t_hit.x + offset * dt) * ray_dir;
 	float maxA = 0.0;
 	for (float t = t_hit.x; t < t_hit.y; t += dt) {
-		float val = texture(volume, p).r;
-		//select maximum intensity. We could write this:
-		// if (val > maxA) maxA = val;
+		vec4 val = texture(volume, p);
+		if (val.a > maxA) {
+			maxA = val.a;
+			color = val;
+		}
 		//http://theorangeduck.com/page/avoiding-shader-conditionals
-		maxA = mix(val, maxA, max(sign(maxA - val), 0.0));
 		p += ray_dir * dt;
 	}
-	if (maxA > 0.0)
-		color = texture(colormap, vec2(maxA, 0.5)).rgba;
 }`;
 
 var blurVertShader =
 `#version 300 es
-#line 280
+#line 276
 precision highp int;
 precision highp float;
 in vec3 vPos;
@@ -289,7 +284,7 @@ void main() {
 
 var blurFragShader =
 `#version 300 es
-#line 292
+#line 288
 precision highp int;
 precision highp float;
 in vec2 TexCoord;
@@ -314,7 +309,7 @@ void main(void) {
 
 var sobelFragShader =
 `#version 300 es
-#line 317
+#line 313
 precision highp int;
 precision highp float;
 in vec2 TexCoord;
@@ -347,12 +342,11 @@ void main(void) {
 
 var fragShaderMatCap =
 `#version 300 es
-#line 350
+#line 346
 precision highp int;
 precision highp float;
 uniform highp sampler3D volume;
 uniform highp sampler3D gradients;
-uniform highp sampler2D colormap;
 uniform sampler2D matcap;
 uniform ivec3 volume_dims;
 uniform mat4 proj_view;
@@ -409,8 +403,7 @@ void main(void) {
 	vec3 p = transformed_eye + (t_hit.x + offset * dt) * ray_dir;
 	mat3 normalMatrix = mat3_emu(normal_matrix);
 	for (float t = t_hit.x; t < t_hit.y; t += dt) {
-		float val = texture(volume, p).r;
-		vec4 val_color = texture(colormap, vec2(val, 0.5)).rgba;
+		vec4 val_color = texture(volume, p);
 		vec4 gradSample = texture(gradients, p);
 		gradSample.rgb = normalize(gradSample.rgb*2.0 - 1.0);
 		vec3 n = normalize(normalMatrix * gradSample.rgb);
@@ -430,7 +423,7 @@ void main(void) {
 
 var computeFragShader =
 `#version 300 es
-#line 434
+#line 427
 precision highp int;
 precision highp float;
 in vec2 TexCoord;
@@ -443,27 +436,40 @@ uniform highp sampler3D intensityVol;
 void main(void) {
   vec3 vx = vec3(TexCoord.xy, coordZ);
   //Neighbor voxels 'T'op/'B'ottom, 'A'nterior/'P'osterior, 'R'ight/'L'eft
-  vec3 LFT = texture(intensityVol,vx+vec3(+dX,0.0,0.0)).rgb;
-  vec3 RHT = texture(intensityVol,vx+vec3(-dX,0.0,0.0)).rgb;
-  vec3 ANT = texture(intensityVol,vx+vec3(0.0,+dY,0.0)).rgb;
-  vec3 PST = texture(intensityVol,vx+vec3(0.0,-dY,0.0)).rgb;
-  vec3 TOP = texture(intensityVol,vx+vec3(0.0,0.0,+dZ)).rgb;
-  vec3 BOT = texture(intensityVol,vx+vec3(0.0,0.0,-dZ)).rgb;
-  vec4 MID4 = texture(intensityVol,vx); //center
-  //FragColor = MID4; return;
-  vec3 MID = MID4.rgb;
-  float alpha = MID4.a;
-  if ((alpha > 0.0) && (LFT == MID) && (RHT == MID) && (ANT == MID)  && (PST == MID)  && (TOP == MID)  && (BOT == MID)) {
-    //alpha = 0.0;
-    MID.r = 1.0;
+  vec4 LFT = texture(intensityVol,vx+vec3(+dX,0.0,0.0));
+  vec4 RHT = texture(intensityVol,vx+vec3(-dX,0.0,0.0));
+  vec4 ANT = texture(intensityVol,vx+vec3(0.0,+dY,0.0));
+  vec4 PST = texture(intensityVol,vx+vec3(0.0,-dY,0.0));
+  vec4 TOP = texture(intensityVol,vx+vec3(0.0,0.0,+dZ));
+  vec4 BOT = texture(intensityVol,vx+vec3(0.0,0.0,-dZ));
+  vec4 MID = texture(intensityVol,vx); //center
+  //FragColor = MID; return;
+  if ( (LFT == MID) && (RHT == MID) && (ANT == MID)  && (PST == MID)  && (TOP == MID)  && (BOT == MID)) {
+    MID = vec4(0.0, 0.0, 0.0, MID.a);
   }
-  FragColor = vec4(MID.rgb, alpha);
+  FragColor = MID;
+}`;
+
+//use lookup table to convert intensity (stored in r) to rgba
+var scalar2rgbFragShader =
+`#version 300 es
+#line 457
+precision highp int;
+precision highp float;
+in vec2 TexCoord;
+out vec4 FragColor;
+uniform float coordZ;
+uniform highp sampler3D intensityVol;
+uniform highp sampler2D colormap;
+void main(void) {
+  float val = texture(intensityVol,vec3(TexCoord.xy, coordZ)).r;
+  FragColor = texture(colormap, vec2(val, 0.5));
 }`;
 
 //simple pass through shader: output is input
 var cloneFragShader =
 `#version 300 es
-#line 464
+#line 473
 precision highp int;
 precision highp float;
 in vec2 TexCoord;
@@ -471,6 +477,13 @@ out vec4 FragColor;
 uniform float coordZ;
 uniform highp sampler3D intensityVol;
 void main(void) {
-  vec3 vx = vec3(TexCoord.xy, coordZ);
-  FragColor = texture(intensityVol,vx);
+  vec4 myColor = texture(intensityVol,vec3(TexCoord.xy, coordZ));
+  //vec4 aliases:
+  // [0,1,2,3] = rgba = xyzw = stpq
+  //myColor = myColor.bgra; //swizzle red/green/blue -> blue/green/red
+  //myColor = myColor.rrra; //grayscale
+  //myColor = myColor.yxzw; //swizzle red/green/blue -> green/red/blue
+  //myColor[1] = myColor[0]; // blue given value of red
+  //myColor.x = myColor.p; //red given same color as green
+  FragColor = myColor;
 }`;
